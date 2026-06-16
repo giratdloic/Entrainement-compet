@@ -271,6 +271,10 @@ svg.chart{display:block;width:100%;overflow:visible}
           <option value="">Tous</option><option value="H">H</option><option value="F">F</option>
         </select>
       </div>
+      <div class="fg">
+        <label>Saison</label>
+        <select id="f-saison" onchange="render()"><option value="">Toutes</option></select>
+      </div>
       <button class="reset-btn" onclick="reset()">↺</button>
     </div>
   </div>
@@ -407,6 +411,16 @@ svg.chart{display:block;width:100%;overflow:visible}
         <input type="file" id="import-train-file" accept=".json" style="display:none" onchange="importTrainingData(event)">
       </div>
       <div class="settings-section">
+        <div class="settings-section-title">🧑‍🤝‍🧑 Nageurs</div>
+        <button class="settings-btn" onclick="openAddSwimmer()">
+          <span class="settings-btn-icon">➕</span>
+          <div class="settings-btn-info">
+            <div class="settings-btn-title">Ajouter un nageur</div>
+            <div class="settings-btn-desc">Pour le suivre à l'entraînement avant sa 1ère compétition</div>
+          </div>
+        </button>
+      </div>
+      <div class="settings-section">
         <div class="settings-section-title">ℹ️ Infos</div>
         <div style="font-size:12px;color:var(--text2);padding:8px 0">
           <div id="settings-info-comp">Données compétition : chargement…</div>
@@ -414,6 +428,48 @@ svg.chart{display:block;width:100%;overflow:visible}
           <div id="settings-info-train" style="margin-top:4px">Séances entraînement : chargement…</div>
         </div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- ADD SWIMMER MODAL -->
+<div class="overlay" id="addsw-overlay" onclick="closeAddSwimmerEvent(event)">
+  <div class="sheet">
+    <div class="sheet-header">
+      <h2>➕ Ajouter un nageur</h2>
+      <button class="sheet-close" onclick="closeAddSwimmer()">✕</button>
+    </div>
+    <div class="sheet-body">
+      <div class="entry-form">
+        <div class="form-row">
+          <div class="form-field"><label>Nom</label><input type="text" id="addsw-nom" placeholder="DUPONT" style="text-transform:uppercase"></div>
+          <div class="form-field"><label>Prénom</label><input type="text" id="addsw-prenom" placeholder="Jean"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-field"><label>Sexe</label><select id="addsw-sex">
+            <option value="H">Homme</option><option value="F">Femme</option>
+          </select></div>
+          <div class="form-field"><label>Tranche d'âge</label><select id="addsw-age">
+            <option value="8 ans ou moins">8 ans ou moins</option>
+            <option value="9-10 ans">9-10 ans</option>
+            <option value="11-12 ans">11-12 ans</option>
+            <option value="13-14 ans">13-14 ans</option>
+            <option value="15-16 ans">15-16 ans</option>
+            <option value="17-19 ans">17-19 ans</option>
+            <option value="20-29 ans">20-29 ans</option>
+            <option value="31-39 ans">31-39 ans</option>
+            <option value="40 ans et +">40 ans et +</option>
+          </select></div>
+        </div>
+        <div class="form-row">
+          <div class="form-field"><label>Club</label><select id="addsw-club">
+            <option value="true" selected>ASVF</option>
+            <option value="false">Autre club</option>
+          </select></div>
+        </div>
+        <button class="btn-primary" onclick="addManualSwimmer()">Ajouter</button>
+      </div>
+      <div id="addsw-list"></div>
     </div>
   </div>
 </div>
@@ -469,6 +525,14 @@ const DIST_ORDER = {'25m':1,'50m':2,'100m':3,'200m':4,'400m':5};
 let sortKey='tps', sortDir=1, currentTab='table', filtersOpen=false;
 
 // ── Utils ──
+function getSaison(dateStr){
+  // dateStr format JJ/MM/AAAA. Saison: 1er sept -> 31 aout
+  const m=/^(\d{2})\/(\d{2})\/(\d{4})$/.exec(dateStr||'');
+  if(!m) return null;
+  const day=+m[1], month=+m[2], year=+m[3];
+  if(month>=9) return year+'/'+String(year+1).slice(2);
+  else return (year-1)+'/'+String(year).slice(2);
+}
 function tpsToNum(t){
   if(!t||t==='0:00.00'||t==='DNS'||t==='DNF') return Infinity;
   const p=t.split(':');
@@ -522,7 +586,7 @@ function toggleFilters(){
 }
 function updateFilterCount(){
   const q=document.getElementById('search').value.trim();
-  const vals=['f-nage','f-dist','f-age','f-sex'].map(id=>document.getElementById(id).value);
+  const vals=['f-nage','f-dist','f-age','f-sex','f-saison'].map(id=>document.getElementById(id).value);
   const n=(q?1:0)+vals.filter(v=>v).length;
   const badge=document.getElementById('filter-count');
   badge.textContent=n; badge.className='filter-count'+(n>0?' visible':'');
@@ -558,7 +622,43 @@ function init(){
   const ages=[...new Set(D.map(r=>r["Tranche d'age"]))].sort();
   populate('f-nage',nages); populate('f-dist',dists); populate('f-age',ages);
   populate('tr-nage',nages); populate('tr-dist',dists); populate('tr-age',ages);
+  populate('f-saison',getAvailableSaisons());
   render();
+}
+
+// Récupère toutes les saisons disponibles à partir de HISTORY
+function getAvailableSaisons(){
+  const set=new Set();
+  Object.values(compData.history).forEach(nageurHist=>{
+    Object.values(nageurHist).forEach(entries=>{
+      entries.forEach(e=>{
+        const s=getSaison(e.d);
+        if(s) set.add(s);
+      });
+    });
+  });
+  return [...set].sort().reverse(); // plus récente d'abord
+}
+
+// Recalcule les meilleurs temps (façon DATA) mais limités à une saison donnée
+function buildSeasonData(saison){
+  if(!saison) return compData.data;
+  const result=[];
+  compData.data.forEach(r=>{
+    const hKey=r.Nom+'|'+r['Prénom'];
+    const nKey=r['Type nage']+'|'+r.Distance;
+    const entries=(compData.history[hKey]&&compData.history[hKey][nKey])||[];
+    const seasonEntries=entries.filter(e=>getSaison(e.d)===saison);
+    if(!seasonEntries.length) return; // pas de résultat sur cette saison pour cette épreuve
+    const best=seasonEntries.reduce((a,b)=>a.tn<b.tn?a:b);
+    result.push({
+      ...r,
+      'Tps Réalisé':best.tr,
+      'Tps Eng.':best.te,
+      tnum:best.tn
+    });
+  });
+  return result;
 }
 
 function getFiltered(){
@@ -567,8 +667,10 @@ function getFiltered(){
   const dist=document.getElementById('f-dist').value;
   const age=document.getElementById('f-age').value;
   const sex=document.getElementById('f-sex').value;
+  const saison=document.getElementById('f-saison')?document.getElementById('f-saison').value:'';
   updateFilterCount();
-  return compData.data.filter(r=>{
+  const sourceData=saison?buildSeasonData(saison):compData.data;
+  return sourceData.filter(r=>{
     if(nage&&r['Type nage']!==nage)return false;
     if(dist&&r.Distance!==dist)return false;
     if(age&&r["Tranche d'age"]!==age)return false;
@@ -726,9 +828,16 @@ function renderChart(rows){
   document.getElementById('chart-title').textContent='Classement — '+rows.length+' résultats';
 }
 
-function reset(){ document.getElementById('search').value=''; ['f-nage','f-dist','f-age','f-sex'].forEach(id=>document.getElementById(id).value=''); sortKey='tps';sortDir=1;render(); }
+function reset(){ document.getElementById('search').value=''; ['f-nage','f-dist','f-age','f-sex','f-saison'].forEach(id=>document.getElementById(id).value=''); sortKey='tps';sortDir=1;render(); }
 
 // ── TRAINING ──
+const LS_MANUAL_SWIMMERS = 'natation_manual_swimmers';
+function loadManualSwimmers(){
+  try{ return JSON.parse(localStorage.getItem(LS_MANUAL_SWIMMERS)||'[]'); }
+  catch{ return []; }
+}
+function saveManualSwimmers(arr){ localStorage.setItem(LS_MANUAL_SWIMMERS, JSON.stringify(arr)); }
+
 function buildCompIndex(){
   const idx={};
   compData.data.forEach(r=>{
@@ -738,11 +847,79 @@ function buildCompIndex(){
     if(!idx[k].bests[nk]||r.tnum<idx[k].bests[nk].tnum)
       idx[k].bests[nk]={nage:r['Type nage'],dist:r.Distance,time:r['Tps Réalisé'],tnum:r.tnum};
   });
+  // Ajoute les nageurs créés manuellement (pas encore de résultat compétition)
+  loadManualSwimmers().forEach(sw=>{
+    const k=sw.nom+'|'+sw.prenom;
+    if(!idx[k]) idx[k]={nom:sw.nom,prenom:sw.prenom,asvf:sw.asvf,hf:sw.hf,age:sw.age,bests:{}};
+  });
   return idx;
 }
 
 // Classement d'un temps (tn) parmi tous les résultats compétition
 // de la même catégorie (âge+sexe+nage+distance), tous clubs confondus
+// ── AJOUT MANUEL DE NAGEUR ──
+function openAddSwimmer(){
+  closeSettings();
+  document.getElementById('addsw-nom').value='';
+  document.getElementById('addsw-prenom').value='';
+  document.getElementById('addsw-sex').value='H';
+  document.getElementById('addsw-age').value='9-10 ans';
+  document.getElementById('addsw-club').value='true';
+  renderManualSwimmersList();
+  document.getElementById('addsw-overlay').className='overlay open';
+  document.body.style.overflow='hidden';
+}
+function closeAddSwimmer(){ document.getElementById('addsw-overlay').className='overlay'; document.body.style.overflow=''; }
+function closeAddSwimmerEvent(e){ if(e.target===document.getElementById('addsw-overlay')) closeAddSwimmer(); }
+
+function addManualSwimmer(){
+  const nom=document.getElementById('addsw-nom').value.trim().toUpperCase();
+  const prenom=document.getElementById('addsw-prenom').value.trim();
+  const hf=document.getElementById('addsw-sex').value;
+  const age=document.getElementById('addsw-age').value;
+  const asvf=document.getElementById('addsw-club').value==='true';
+  if(!nom||!prenom){ showToast('⚠️ Nom et prénom obligatoires'); return; }
+
+  // Vérifie qu'il n'existe pas déjà (compétition ou manuel)
+  const exists=Object.values(buildCompIndex()).some(sw=>
+    sw.nom.toUpperCase()===nom && sw.prenom.toLowerCase()===prenom.toLowerCase()
+  );
+  if(exists){ showToast('⚠️ Ce nageur existe déjà'); return; }
+
+  const list=loadManualSwimmers();
+  list.push({nom, prenom: prenom.charAt(0).toUpperCase()+prenom.slice(1).toLowerCase(), hf, age, asvf});
+  saveManualSwimmers(list);
+
+  document.getElementById('addsw-nom').value='';
+  document.getElementById('addsw-prenom').value='';
+  renderManualSwimmersList();
+  renderTraining();
+  showToast('✅ '+prenom+' '+nom+' ajouté(e)');
+}
+
+function removeManualSwimmer(idx){
+  if(!window.confirm('Supprimer ce nageur de la liste ?')) return;
+  const list=loadManualSwimmers();
+  list.splice(idx,1);
+  saveManualSwimmers(list);
+  renderManualSwimmersList();
+  renderTraining();
+}
+
+function renderManualSwimmersList(){
+  const list=loadManualSwimmers();
+  const el=document.getElementById('addsw-list');
+  if(!list.length){ el.innerHTML=''; return; }
+  el.innerHTML='<div class="train-hist-hdr" style="margin-top:14px">Nageurs ajoutés manuellement</div>'+
+    '<table class="tt"><tbody>'+
+    list.map((sw,i)=>
+      '<tr><td>'+(sw.asvf?'<span class="badge-asvf" style="font-size:9px;padding:1px 4px;margin-right:4px">ASVF</span>':'')+sw.prenom+' '+sw.nom+'</td>'+
+      '<td style="font-size:11px;color:var(--text2)">'+sw.age+' · '+sw.hf+'</td>'+
+      '<td><button class="btn-del" onclick="removeManualSwimmer('+i+')">🗑</button></td></tr>'
+    ).join('')+
+    '</tbody></table>';
+}
+
 function getRanking(tn, nage, dist, age, hf){
   if(!isFinite(tn)) return null;
   const sameCategory = compData.data.filter(r=>
@@ -1464,7 +1641,7 @@ function downloadJSON(data, filename){
 // ── KEYBOARD ──
 document.addEventListener('keydown',e=>{
   if(e.key==='Escape'){
-    closeCompModalDirect(); closeTrainModalDirect(); closeSettings(); closePdfImport();
+    closeCompModalDirect(); closeTrainModalDirect(); closeSettings(); closePdfImport(); closeAddSwimmer();
   }
 });
 
