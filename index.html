@@ -234,6 +234,50 @@ svg.chart{display:block;width:100%;overflow:visible}
 /* Toast notification */
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:#1a1a18;color:#fff;padding:10px 20px;border-radius:10px;font-size:13px;font-weight:500;z-index:9999;transition:transform .3s;pointer-events:none}
 .toast.show{transform:translateX(-50%) translateY(0)}
+
+/* ══════════════════════════════════════════
+   OPTIMISATIONS MOBILE / TACTILE
+   ══════════════════════════════════════════ */
+@media(max-width:640px){
+  /* Zones tactiles agrandies */
+  .header-btn{padding:9px 14px;font-size:13px;min-height:40px}
+  .tab{padding:11px 14px;font-size:13px;min-height:40px;display:flex;align-items:center}
+  .reset-btn{padding:9px 14px;min-height:40px}
+  .sheet-close{width:36px;height:36px;font-size:16px}
+  .btn-del{font-size:18px;padding:8px 10px;min-width:40px;min-height:40px;display:inline-flex;align-items:center;justify-content:center}
+  .btn-primary{padding:13px 16px;font-size:15px;min-height:46px}
+  .btn-text-sm{padding:7px 12px;font-size:12px;min-height:34px}
+  .swimmer-card{padding:14px 16px;min-height:60px}
+  .filters-inner select,.filters-inner input,.training-toolbar select,.training-toolbar input{min-height:40px;font-size:14px}
+  .form-field input,.form-field select,.form-field textarea{min-height:42px;font-size:15px}
+
+  /* Tableau résultats -> vue carte empilée */
+  .table-wrap table thead{display:none}
+  .table-wrap table, .table-wrap tbody, .table-wrap tr, .table-wrap td{display:block;width:100%}
+  .table-wrap tr{padding:13px 14px;border-bottom:1px solid var(--border);min-height:44px}
+  .table-wrap td{padding:3px 0;white-space:normal}
+  .table-wrap td:first-child{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+  .table-wrap td:last-child{border-top:1px dashed var(--border);padding-top:6px;margin-top:2px}
+
+  /* Formulaire de saisie séance : sticky en haut du modal */
+  .entry-form{position:sticky;top:0;z-index:10;box-shadow:0 4px 10px rgba(0,0,0,.15)}
+
+  /* Sheet plein écran sur mobile pour plus de confort */
+  .sheet,.sheet.sheet-wide,.settings-sheet{max-width:100%;border-radius:14px 14px 0 0;max-height:94vh}
+
+  /* Toast plus visible */
+  .toast{font-size:14px;padding:12px 22px;bottom:20px}
+
+  /* Comp ref bar : touch-friendly */
+  .comp-ref-bar{padding:13px 14px;min-height:48px}
+}
+
+/* Très petits écrans (téléphones étroits) */
+@media(max-width:380px){
+  .training-toolbar{padding:8px 10px}
+  .training-toolbar select,.training-toolbar input{min-width:80px;font-size:12px}
+  header h1{font-size:14px}
+}
 </style>
 </head>
 <body>
@@ -353,6 +397,7 @@ svg.chart{display:block;width:100%;overflow:visible}
   <div class="sheet sheet-wide">
     <div class="sheet-header">
       <h2 id="train-title">Fiche entraînement</h2>
+      <button class="btn-text-sm" onclick="hideCurrentSwimmer()" title="Masquer ce nageur (ex: a quitté le club)" style="white-space:nowrap">👁️‍🗨️ Masquer</button>
       <button class="sheet-close" onclick="closeTrainModalDirect()">✕</button>
     </div>
     <div class="sheet-body" id="train-body"></div>
@@ -419,6 +464,13 @@ svg.chart{display:block;width:100%;overflow:visible}
             <div class="settings-btn-desc">Pour le suivre à l'entraînement avant sa 1ère compétition</div>
           </div>
         </button>
+        <button class="settings-btn" onclick="openHiddenSwimmers()">
+          <span class="settings-btn-icon">👁️</span>
+          <div class="settings-btn-info">
+            <div class="settings-btn-title">Nageurs masqués</div>
+            <div class="settings-btn-desc" id="hidden-count-desc">Réafficher un nageur parti du club</div>
+          </div>
+        </button>
       </div>
       <div class="settings-section">
         <div class="settings-section-title">ℹ️ Infos</div>
@@ -429,6 +481,17 @@ svg.chart{display:block;width:100%;overflow:visible}
         </div>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- HIDDEN SWIMMERS MODAL -->
+<div class="overlay" id="hidden-overlay" onclick="closeHiddenSwimmersEvent(event)">
+  <div class="sheet">
+    <div class="sheet-header">
+      <h2>👁️ Nageurs masqués</h2>
+      <button class="sheet-close" onclick="closeHiddenSwimmers()">✕</button>
+    </div>
+    <div class="sheet-body" id="hidden-list-body"></div>
   </div>
 </div>
 
@@ -463,7 +526,7 @@ svg.chart{display:block;width:100%;overflow:visible}
         </div>
         <div class="form-row">
           <div class="form-field"><label>Club</label><select id="addsw-club">
-            <option value="true" selected>ASVF</option>
+            <option value="true">ASVF</option>
             <option value="false">Autre club</option>
           </select></div>
         </div>
@@ -831,6 +894,25 @@ function renderChart(rows){
 function reset(){ document.getElementById('search').value=''; ['f-nage','f-dist','f-age','f-sex','f-saison'].forEach(id=>document.getElementById(id).value=''); sortKey='tps';sortDir=1;render(); }
 
 // ── TRAINING ──
+const LS_HIDDEN_SWIMMERS = 'natation_hidden_swimmers';
+function loadHiddenSwimmers(){
+  try{ return JSON.parse(localStorage.getItem(LS_HIDDEN_SWIMMERS)||'[]'); }
+  catch{ return []; }
+}
+function saveHiddenSwimmers(arr){ localStorage.setItem(LS_HIDDEN_SWIMMERS, JSON.stringify(arr)); }
+function isSwimmerHidden(nom, prenom){
+  return loadHiddenSwimmers().includes(nom+'|'+prenom);
+}
+function hideSwimmer(nom, prenom){
+  const list=loadHiddenSwimmers();
+  const k=nom+'|'+prenom;
+  if(!list.includes(k)){ list.push(k); saveHiddenSwimmers(list); }
+}
+function unhideSwimmer(nom, prenom){
+  const list=loadHiddenSwimmers().filter(k=>k!==nom+'|'+prenom);
+  saveHiddenSwimmers(list);
+}
+
 const LS_MANUAL_SWIMMERS = 'natation_manual_swimmers';
 function loadManualSwimmers(){
   try{ return JSON.parse(localStorage.getItem(LS_MANUAL_SWIMMERS)||'[]'); }
@@ -857,6 +939,42 @@ function buildCompIndex(){
 
 // Classement d'un temps (tn) parmi tous les résultats compétition
 // de la même catégorie (âge+sexe+nage+distance), tous clubs confondus
+// ── NAGEURS MASQUÉS ──
+function openHiddenSwimmers(){
+  closeSettings();
+  renderHiddenSwimmersList();
+  document.getElementById('hidden-overlay').className='overlay open';
+  document.body.style.overflow='hidden';
+}
+function closeHiddenSwimmers(){ document.getElementById('hidden-overlay').className='overlay'; document.body.style.overflow=''; }
+function closeHiddenSwimmersEvent(e){ if(e.target===document.getElementById('hidden-overlay')) closeHiddenSwimmers(); }
+
+function renderHiddenSwimmersList(){
+  const hiddenKeys=loadHiddenSwimmers();
+  const body=document.getElementById('hidden-list-body');
+  if(!hiddenKeys.length){
+    body.innerHTML='<div class="train-empty">Aucun nageur masqué.</div>';
+    return;
+  }
+  const idx=buildCompIndex();
+  body.innerHTML='<table class="tt"><tbody>'+
+    hiddenKeys.map(k=>{
+      const[nom,prenom]=k.split('|');
+      const sw=idx[k];
+      const asvfBadge=(sw&&sw.asvf)?'<span class="badge-asvf" style="font-size:9px;padding:1px 4px;margin-right:4px">ASVF</span>':'';
+      return '<tr><td>'+asvfBadge+prenom+' '+nom+'</td>'+
+        '<td><button class="btn-text-sm" onclick="unhideAndRefresh(\''+nom.replace(/'/g,"\\'")+'\',\''+prenom.replace(/'/g,"\\'")+'\')">👁️ Réafficher</button></td></tr>';
+    }).join('')+
+    '</tbody></table>';
+}
+
+function unhideAndRefresh(nom, prenom){
+  unhideSwimmer(nom, prenom);
+  renderHiddenSwimmersList();
+  renderTraining();
+  showToast('✅ '+prenom+' '+nom+' réaffiché(e)');
+}
+
 // ── AJOUT MANUEL DE NAGEUR ──
 function openAddSwimmer(){
   closeSettings();
@@ -948,6 +1066,7 @@ function getTrainingSwimmers(){
   const age=document.getElementById('tr-age').value;
   const sex=document.getElementById('tr-sex').value;
   return Object.values(buildCompIndex()).filter(sw=>{
+    if(isSwimmerHidden(sw.nom, sw.prenom))return false;
     if(club==='asvf'&&!sw.asvf)return false;
     if(club==='other'&&sw.asvf)return false;
     if(sex&&sw.hf!==sex)return false;
@@ -1064,7 +1183,7 @@ function renderTrainModal(){
     '<div class="entry-form-title">➕ Nouvelle séance</div>'+
     '<div class="form-row">'+
       '<div class="form-field" style="max-width:130px"><label>Date</label><input type="date" id="tf-date" value="'+todayISO()+'"></div>'+
-      '<div class="form-field" style="max-width:120px"><label>Chrono</label><input type="text" id="tf-time" placeholder="'+(bests[defaultNK]?bests[defaultNK].time:'0:28.45')+'" inputmode="numeric" oninput="fmtTime(this)"></div>'+
+      '<div class="form-field" style="max-width:120px"><label>Chrono</label><input type="text" id="tf-time" inputmode="numeric" placeholder="'+(bests[defaultNK]?bests[defaultNK].time:'0:28.45')+'" oninput="fmtTime(this)"></div>'+
     '</div>'+
     '<div class="form-row">'+
       '<div class="form-field"><label>Nage</label><select id="tf-nage-sel" onchange="_selectedNage=this.value;renderTrainModal()">'+
@@ -1184,6 +1303,14 @@ function deleteAllTrainSessions(){
   renderTrainModal(); renderTraining();
   showToast('🗑 Historique effacé');
 }
+function hideCurrentSwimmer(){
+  if(!currentTrainSw)return;
+  if(!window.confirm('Masquer '+currentTrainSw.prenom+' '+currentTrainSw.nom+' de la liste entraînement ?\n\nSon historique (compétition et séances) sera conservé. Tu pourras le réafficher depuis les Paramètres.'))return;
+  hideSwimmer(currentTrainSw.nom, currentTrainSw.prenom);
+  closeTrainModalDirect();
+  renderTraining();
+  showToast('👁️ '+currentTrainSw.prenom+' '+currentTrainSw.nom+' masqué(e)');
+}
 function closeTrainModal(e){ if(e.target===document.getElementById('train-overlay'))closeTrainModalDirect(); }
 function closeTrainModalDirect(){ document.getElementById('train-overlay').className='overlay'; document.body.style.overflow=''; _selectedNage=''; _selectedDist=''; }
 
@@ -1222,6 +1349,9 @@ function updateSettingsInfo(){
     'Données compétition : '+nb+' résultats · '+nbNag+' nageurs';
   document.getElementById('settings-info-last').textContent=
     'Dernière compétition importée : '+getLastCompDate();
+  const hiddenCount=loadHiddenSwimmers().length;
+  const hd=document.getElementById('hidden-count-desc');
+  if(hd) hd.textContent=hiddenCount>0?(hiddenCount+' nageur'+(hiddenCount>1?'s':'')+' masqué'+(hiddenCount>1?'s':'')):'Aucun nageur masqué';
   const trainData=loadTraining();
   const nbSess=Object.values(trainData).reduce((s,a)=>s+a.length,0);
   const nbNagTrain=Object.keys(trainData).filter(k=>trainData[k].length>0).length;
@@ -1641,7 +1771,7 @@ function downloadJSON(data, filename){
 // ── KEYBOARD ──
 document.addEventListener('keydown',e=>{
   if(e.key==='Escape'){
-    closeCompModalDirect(); closeTrainModalDirect(); closeSettings(); closePdfImport(); closeAddSwimmer();
+    closeCompModalDirect(); closeTrainModalDirect(); closeSettings(); closePdfImport(); closeAddSwimmer(); closeHiddenSwimmers();
   }
 });
 
